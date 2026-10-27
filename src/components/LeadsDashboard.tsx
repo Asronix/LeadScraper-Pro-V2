@@ -58,6 +58,7 @@ interface LeadsDashboardProps {
   onOpenCsvImport?: () => void;
   onOpenExcludedSites?: () => void;
   onOpenSettings?: () => void;
+  onOpenSyncHub?: () => void;
   onSaveAsDefaultTemplate?: (template: EmailTemplate) => void;
 }
 
@@ -87,6 +88,7 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({
   onOpenCsvImport,
   onOpenExcludedSites,
   onOpenSettings,
+  onOpenSyncHub,
   onSaveAsDefaultTemplate
 }) => {
   // Filters & State
@@ -354,20 +356,35 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-stretch md:self-auto flex-wrap">
-            {isGoogleConnected && googleSheetConfig?.spreadsheetUrl && (
+            {onOpenSyncHub && (
+              <button
+                type="button"
+                onClick={onOpenSyncHub}
+                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs text-xs"
+                title="Configure Google Sheet Sync & link spreadsheets"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Sync with Google Sheets</span>
+                {isGoogleConnected && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                )}
+              </button>
+            )}
+
+            {googleSheetConfig?.spreadsheetUrl && (
               <a
                 href={googleSheetConfig.spreadsheetUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-emerald-500 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs text-xs"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-emerald-500 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs text-xs"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Open Google Sheet</span>
+                <span>Open Sheet</span>
                 <ExternalLink className="w-3 h-3 opacity-60" />
               </a>
             )}
 
-            {isGoogleConnected && onTriggerGoogleSheetSync && (
+            {onTriggerGoogleSheetSync && (
               <button
                 type="button"
                 disabled={isSyncingSheet}
@@ -379,15 +396,15 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({
                     setIsSyncingSheet(false);
                   }
                 }}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50 text-xs"
+                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50 text-xs"
                 title="Push all current dashboard leads to the Google Sheet spreadsheet"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-spin' : ''}`} />
-                <span>{isSyncingSheet ? 'Syncing...' : 'Push to Sheet'}</span>
+                <span>{isSyncingSheet ? 'Pushing...' : 'Push to Sheet'}</span>
               </button>
             )}
 
-            {isGoogleConnected && onFetchFromGoogleSheet && (
+            {onFetchFromGoogleSheet && (
               <button
                 type="button"
                 disabled={isPullingSheet}
@@ -404,17 +421,6 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({
               >
                 <Upload className="w-3.5 h-3.5 text-sky-500 rotate-180" />
                 <span>{isPullingSheet ? 'Pulling...' : 'Pull from Sheet'}</span>
-              </button>
-            )}
-
-            {!isGoogleConnected && onConnectGoogleSheets && (
-              <button
-                type="button"
-                onClick={onConnectGoogleSheets}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs text-xs"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Connect Google Sheets</span>
               </button>
             )}
           </div>
@@ -671,6 +677,21 @@ export const LeadsDashboard: React.FC<LeadsDashboardProps> = ({
               >
                 <Settings className="w-3.5 h-3.5 text-sky-500" />
                 Template Settings
+              </button>
+            )}
+
+            {/* Sync with GSheets Button */}
+            {onOpenSyncHub && (
+              <button
+                onClick={onOpenSyncHub}
+                className="py-2 px-3 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Open Google Sheets Sync Hub & Controls"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Sync with GSheets</span>
+                {isGoogleConnected && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                )}
               </button>
             )}
           </div>

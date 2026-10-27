@@ -340,45 +340,69 @@ export default function App() {
       } else {
         await syncAllLeadsToGoogleSheet(res.accessToken, currentConfig.spreadsheetId, leads, currentConfig.sheetName || 'Leads');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error connecting Google Sheets:', err);
+      if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
+        throw new Error(
+          `Domain '${window.location.hostname}' is not authorized in Firebase Console (Authentication > Settings > Authorized Domains). You can still link any Google Sheet directly by URL or ID without signing in!`
+        );
+      }
+      throw err;
     }
   };
 
   // Manual Trigger Google Sheet Sync
   const handleTriggerGoogleSheetSync = async () => {
+    if (!googleSheetConfig.spreadsheetId) {
+      throw new Error('Please enter a Google Spreadsheet URL or ID in the Sync Hub first.');
+    }
+
     let token = googleToken;
     if (!token) {
-      const res = await googleSignIn();
-      if (res) {
-        token = res.accessToken;
-        setGoogleToken(res.accessToken);
-        setGoogleUser(res.user);
+      try {
+        const res = await googleSignIn();
+        if (res) {
+          token = res.accessToken;
+          setGoogleToken(res.accessToken);
+          setGoogleUser(res.user);
+        }
+      } catch (authErr: any) {
+        if (authErr?.code === 'auth/unauthorized-domain' || authErr?.message?.includes('unauthorized-domain')) {
+          throw new Error(
+            `Firebase Domain Auth: Preview domain '${window.location.hostname}' is not authorized in Firebase Authentication Settings. You can pull leads without logging in, or download the formatted CSV below.`
+          );
+        }
+        throw authErr;
       }
     }
-    if (!token || !googleSheetConfig.spreadsheetId) return;
+
+    if (!token) {
+      throw new Error('Google Sign-In is required to push leads directly to Google Sheets via API.');
+    }
 
     await syncAllLeadsToGoogleSheet(token, googleSheetConfig.spreadsheetId, leads, googleSheetConfig.sheetName || 'Leads');
     setGoogleSheetConfig(prev => ({
       ...prev,
+      syncStatus: 'synced',
       lastSyncedAt: new Date().toISOString()
     }));
   };
 
-  // Pull Leads from Google Sheet
+  // Pull Leads from Google Sheet (supports public link-shared sheets without requiring Google Sign-In)
   const handleFetchFromGoogleSheet = async () => {
-    let token = googleToken;
-    if (!token) {
-      const res = await googleSignIn();
-      if (res) {
-        token = res.accessToken;
-        setGoogleToken(res.accessToken);
-        setGoogleUser(res.user);
-      }
+    if (!googleSheetConfig.spreadsheetId) {
+      throw new Error('Please paste your Google Spreadsheet URL or ID in the Sync Hub first.');
     }
-    if (!token || !googleSheetConfig.spreadsheetId) return;
 
-    const remoteLeads = await fetchLeadsFromGoogleSheet(token, googleSheetConfig.spreadsheetId, googleSheetConfig.sheetName || 'Leads');
+    // Do NOT force Google sign in for pull - public sheets can be read directly!
+    const token = googleToken;
+
+    const remoteLeads = await fetchLeadsFromGoogleSheet(
+      token,
+      googleSheetConfig.spreadsheetId,
+      googleSheetConfig.sheetName || 'Leads'
+    );
+
     if (remoteLeads && remoteLeads.length > 0) {
       setLeads(prev => {
         const existingMap = new Map(prev.map(l => [l.email.toLowerCase(), l]));
@@ -393,6 +417,13 @@ export default function App() {
         });
         return Array.from(existingMap.values());
       });
+      setGoogleSheetConfig(prev => ({
+        ...prev,
+        syncStatus: 'synced',
+        lastSyncedAt: new Date().toISOString()
+      }));
+    } else {
+      throw new Error(`The connected sheet '${googleSheetConfig.sheetName || 'Leads'}' has no rows or is empty.`);
     }
   };
 
@@ -670,6 +701,7 @@ export default function App() {
                   onOpenCsvImport={() => setIsCsvImportOpen(true)}
                   onOpenExcludedSites={() => setIsExcludedSitesOpen(true)}
                   onOpenSettings={() => setIsSettingsOpen(true)}
+                  onOpenSyncHub={() => setIsSyncModalOpen(true)}
                   onSaveAsDefaultTemplate={setEmailTemplate}
                 />
               </div>

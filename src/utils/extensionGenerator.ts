@@ -522,7 +522,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         el.style.backgroundColor = highlightsActive ? '#fef08a' : 'transparent';
         el.style.border = highlightsActive ? '1px solid #eab308' : 'none';
       });
-    return true;
+      return true;
+    }
   });
 
   // Real-time window message bridge with web dashboard

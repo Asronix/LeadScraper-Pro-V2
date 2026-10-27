@@ -87,6 +87,19 @@ export function extractWebsiteName(url: string, pageTitle?: string): string {
 }
 
 /**
+ * Helper to check whether HTML attributes have the boolean or value `hidden` attribute,
+ * while safely ignoring CSS classes containing the word hidden (e.g. overflow-hidden, md:hidden).
+ */
+function hasExplicitHiddenAttribute(attrs: string): boolean {
+  if (!attrs) return false;
+  // Remove class="..." and id="..." attributes so CSS classes like overflow-hidden or md:hidden are not matched
+  const sanitized = attrs
+    .replace(/\bclass\s*=\s*["'][^"']*["']/gi, ' ')
+    .replace(/\bid\s*=\s*["'][^"']*["']/gi, ' ');
+  return /(?:^|\s)hidden(?:\s*=\s*["']?(?:true|hidden)?["']?|(?=[\s>/]|$))/i.test(sanitized);
+}
+
+/**
  * Checks if a standalone snippet has hidden CSS or attributes
  */
 export function isSnippetHidden(snippet: string): { isHidden: boolean; reason?: string } {
@@ -96,7 +109,7 @@ export function isSnippetHidden(snippet: string): { isHidden: boolean; reason?: 
   if (/opacity\s*:\s*0(?![.0-9])/i.test(lower)) return { isHidden: true, reason: 'CSS opacity: 0' };
   if (/type\s*=\s*["']hidden["']/i.test(lower)) return { isHidden: true, reason: 'Hidden input field' };
   if (/aria-hidden\s*=\s*["']true["']/i.test(lower)) return { isHidden: true, reason: 'aria-hidden="true"' };
-  if (/\bhidden\b/i.test(lower)) return { isHidden: true, reason: 'HTML hidden attribute' };
+  if (hasExplicitHiddenAttribute(lower)) return { isHidden: true, reason: 'HTML hidden attribute' };
   return { isHidden: false };
 }
 
@@ -121,13 +134,12 @@ export function isPositionHiddenInHtml(html: string, pos: number): { isHidden: b
     if (/visibility\s*:\s*hidden/i.test(tagContent)) {
       return { isHidden: true, reason: 'Tag has style="visibility:hidden"' };
     }
-    if (/\bhidden\b/i.test(tagContent)) {
+    if (hasExplicitHiddenAttribute(tagContent)) {
       return { isHidden: true, reason: 'Tag has HTML hidden attribute' };
     }
   }
 
   // 2. Scan backwards for unclosed parent tags before `pos`
-  // We match tags from the start up to pos
   const textBefore = html.substring(0, pos);
   
   // Track open tags and their hidden attributes
@@ -167,12 +179,12 @@ export function isPositionHiddenInHtml(html: string, pos: number): { isHidden: b
       } else if (/aria-hidden\s*=\s*["']true["']/i.test(attrs)) {
         isHidden = true;
         reason = 'Parent <' + tagName + '> has aria-hidden="true"';
-      } else if (/\bhidden\b/i.test(attrs)) {
-        isHidden = true;
-        reason = 'Parent <' + tagName + '> has hidden attribute';
       } else if (['script', 'style', 'template', 'noscript'].includes(tagName)) {
         isHidden = true;
         reason = 'Inside non-rendered <' + tagName + '> block';
+      } else if (hasExplicitHiddenAttribute(attrs)) {
+        isHidden = true;
+        reason = 'Parent <' + tagName + '> has hidden attribute';
       }
 
       tagStack.push({ tag: tagName, isHidden, reason });
@@ -190,6 +202,27 @@ export function isPositionHiddenInHtml(html: string, pos: number): { isHidden: b
 }
 
 /**
+ * Normalizes content by decoding common HTML entities and email obfuscations
+ */
+function normalizeObfuscatedContent(content: string): string {
+  if (!content) return '';
+  let str = content
+    .replace(/&#64;/gi, '@')
+    .replace(/&#x40;/gi, '@')
+    .replace(/%40/gi, '@')
+    .replace(/&#46;/gi, '.')
+    .replace(/&#x2e;/gi, '.');
+
+  // Decode common anti-scraper patterns: "user [at] domain.com" or "user(at)domain[dot]com"
+  str = str.replace(
+    /\b([a-zA-Z0-9._%+-]+)\s*(?:\[at\]|\(at\)|\[AT\]|\(AT\))\s*([a-zA-Z0-9.-]+)\s*(?:\[dot\]|\(dot\)|\.)\s*([a-zA-Z]{2,24})\b/g,
+    '$1@$2.$3'
+  );
+
+  return str;
+}
+
+/**
  * Scrapes and classifies emails from HTML/text content.
  * Distinguishes visible from hidden emails.
  */
@@ -202,39 +235,63 @@ export function parseAndClassifyEmails(
   const hiddenEmails = new Map<string, string>(); // email -> reason
   const scrapedItems: ScrapedEmailItem[] = [];
 
+  const normalized = normalizeObfuscatedContent(rawContent || '');
+
   // Match all potential emails in content
-  const matches = rawContent.match(EMAIL_REGEX) || [];
+  const matches = normalized.match(EMAIL_REGEX) || [];
   const uniqueCandidates = Array.from(new Set(matches.map(sanitizeEmail))).filter(isValidEmail);
 
-  const lowerContent = rawContent.toLowerCase();
+  const lowerContent = normalized.toLowerCase();
 
-  // Analyze each email candidate with its surrounding context
+  // Analyze each email candidate.
+  // Note: An email may appear in multiple places on a page (e.g. once in hidden meta, once in visible text).
+  // If ANY occurrence is visible, mark the email as VISIBLE!
   for (const candidate of uniqueCandidates) {
     const candidateLower = candidate.toLowerCase();
-    const index = lowerContent.indexOf(candidateLower);
+    
+    // Find all occurrences of this candidate in the document
+    let searchStart = 0;
+    let foundVisible = false;
+    let lastHiddenReason = 'Hidden element';
+    let firstSnippet = '';
 
-    const start = Math.max(0, index - 60);
-    const end = Math.min(rawContent.length, index + candidate.length + 60);
-    const contextSnippet = rawContent.substring(start, end).replace(/\s+/g, ' ').trim();
+    while (searchStart < lowerContent.length) {
+      const index = lowerContent.indexOf(candidateLower, searchStart);
+      if (index === -1) break;
 
-    const hiddenCheck = index !== -1 ? isPositionHiddenInHtml(rawContent, index) : { isHidden: false };
+      const start = Math.max(0, index - 60);
+      const end = Math.min(normalized.length, index + candidate.length + 60);
+      const contextSnippet = normalized.substring(start, end).replace(/\s+/g, ' ').trim();
+      if (!firstSnippet) firstSnippet = contextSnippet;
 
-    if (hiddenCheck.isHidden) {
-      hiddenEmails.set(candidate, hiddenCheck.reason || 'Hidden element');
-      scrapedItems.push({
-        email: candidate,
-        contextSnippet,
-        isVisible: false,
-        bypassReason: hiddenCheck.reason,
-        foundIn: 'hidden'
-      });
-    } else {
+      const check = isPositionHiddenInHtml(normalized, index);
+      if (!check.isHidden) {
+        foundVisible = true;
+        firstSnippet = contextSnippet;
+        break; // Found a visible instance!
+      } else {
+        lastHiddenReason = check.reason || lastHiddenReason;
+      }
+
+      searchStart = index + candidate.length;
+    }
+
+    if (foundVisible) {
       visibleEmails.add(candidate);
       scrapedItems.push({
         email: candidate,
-        contextSnippet,
+        contextSnippet: firstSnippet,
         isVisible: true,
-        foundIn: contextSnippet.toLowerCase().includes('mailto:') ? 'mailto' : 'text'
+        foundIn: firstSnippet.toLowerCase().includes('mailto:') ? 'mailto' : 'text'
+      });
+    } else {
+      hiddenEmails.set(candidate, lastHiddenReason);
+      scrapedItems.push({
+        email: candidate,
+        contextSnippet: firstSnippet,
+        isVisible: false,
+        bypassReason: lastHiddenReason,
+        foundIn: 'hidden'
       });
     }
   }
@@ -343,6 +400,39 @@ export function extractOutboundLinksFromHtml(
         } catch {}
       });
 
+      // Also extract plain-text URLs that may not be wrapped in <a> tags
+      const plainUrlRegex = /\bhttps?:\/\/[^\s"'<>\\]+/gi;
+      let textMatch: RegExpExecArray | null;
+      while ((textMatch = plainUrlRegex.exec(html)) !== null) {
+        try {
+          const rawFoundUrl = textMatch[0].replace(/[.,;:!?)'"\]}>]+$/, '');
+          const resolved = new URL(rawFoundUrl);
+          if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue;
+
+          const targetHost = resolved.hostname.replace(/^www\./, '').toLowerCase();
+          if (
+            !targetHost ||
+            targetHost === currentHost ||
+            targetHost.endsWith('.' + currentHost) ||
+            currentHost.endsWith('.' + targetHost)
+          ) {
+            continue;
+          }
+
+          const fullUrl = resolved.href;
+          if (seenUrls.has(fullUrl)) continue;
+          seenUrls.add(fullUrl);
+
+          const isExcluded = isDomainExcluded(targetHost, excludedList);
+          outboundLinks.push({
+            url: fullUrl,
+            domain: targetHost,
+            anchorText: targetHost,
+            isExcluded
+          });
+        } catch {}
+      }
+
       return outboundLinks;
     } catch {}
   }
@@ -396,6 +486,39 @@ export function extractOutboundLinksFromHtml(
     } catch {
       // invalid URL
     }
+  }
+
+  // Also scan for plain text URLs in regex fallback mode
+  const plainUrlRegex = /\bhttps?:\/\/[^\s"'<>\\]+/gi;
+  let textMatch: RegExpExecArray | null;
+  while ((textMatch = plainUrlRegex.exec(html)) !== null) {
+    try {
+      const rawFoundUrl = textMatch[0].replace(/[.,;:!?)'"\]}>]+$/, '');
+      const resolved = new URL(rawFoundUrl);
+      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue;
+
+      const targetHost = resolved.hostname.replace(/^www\./, '').toLowerCase();
+      if (
+        !targetHost ||
+        targetHost === currentHost ||
+        targetHost.endsWith('.' + currentHost) ||
+        currentHost.endsWith('.' + targetHost)
+      ) {
+        continue;
+      }
+
+      const fullUrl = resolved.href;
+      if (seenUrls.has(fullUrl)) continue;
+      seenUrls.add(fullUrl);
+
+      const isExcluded = isDomainExcluded(targetHost, excludedList);
+      outboundLinks.push({
+        url: fullUrl,
+        domain: targetHost,
+        anchorText: targetHost,
+        isExcluded
+      });
+    } catch {}
   }
 
   return outboundLinks;

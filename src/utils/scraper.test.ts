@@ -44,22 +44,26 @@ test('extractWebsiteName creates clean brand names', () => {
   assert.equal(extractWebsiteName('https://linear.app'), 'Linear');
 });
 
-test('isSnippetHidden flags display:none, visibility:hidden, and hidden inputs', () => {
+test('isSnippetHidden flags display:none, visibility:hidden, and hidden inputs while ignoring class names like overflow-hidden', () => {
   assert.equal(isSnippetHidden('<div style="display:none">spamtrap@honeypot.org</div>').isHidden, true);
   assert.equal(isSnippetHidden('<span style="visibility: hidden">hidden@secret.com</span>').isHidden, true);
   assert.equal(isSnippetHidden('<input type="hidden" value="stealth@trap.io">').isHidden, true);
   assert.equal(isSnippetHidden('<div aria-hidden="true">aria@stealth.com</div>').isHidden, true);
+  assert.equal(isSnippetHidden('<div hidden>hidden-attr@trap.com</div>').isHidden, true);
   assert.equal(isSnippetHidden('<p class="font-bold text-gray-800">hello@founder.com</p>').isHidden, false);
+  assert.equal(isSnippetHidden('<div class="max-w-xl mx-auto overflow-hidden">safe@domain.com</div>').isHidden, false);
+  assert.equal(isSnippetHidden('<div class="md:hidden lg:flex">responsive@domain.com</div>').isHidden, false);
 });
 
-test('parseAndClassifyEmails correctly separates visible emails from hidden bypasses', () => {
+test('parseAndClassifyEmails correctly separates visible emails from hidden bypasses and handles obfuscation', () => {
   const html = `
     <html>
-      <body>
+      <body class="overflow-x-hidden">
         <header>
           <h1>Acme Corp</h1>
           <p>Reach our sales team at <a href="mailto:sales@acmeco.com">sales@acmeco.com</a></p>
           <p>Founder desk: alex@acmeco.com.</p>
+          <p>Obfuscated contact: press [at] acmeco [dot] com</p>
         </header>
         <div style="display:none" class="bot-trap">
           <input type="hidden" name="trap" value="bot-honeypot@acmeco.com" />
@@ -71,6 +75,7 @@ test('parseAndClassifyEmails correctly separates visible emails from hidden bypa
   const result = parseAndClassifyEmails(html, 'https://acmeco.com/contact', 'Acme Corp | Contact Us');
   assert.equal(result.visibleEmails.includes('sales@acmeco.com'), true);
   assert.equal(result.visibleEmails.includes('alex@acmeco.com'), true);
+  assert.equal(result.visibleEmails.includes('press@acmeco.com'), true);
   assert.equal(result.visibleEmails.includes('bot-honeypot@acmeco.com'), false);
   assert.equal(result.hiddenEmailsBypassed.some(h => h.email === 'bot-honeypot@acmeco.com'), true);
 });
@@ -83,7 +88,7 @@ test('isDomainExcluded detects blacklist and subdomains', () => {
   assert.equal(isDomainExcluded('https://healthhub.org', blacklist), false);
 });
 
-test('extractOutboundLinksFromHtml filters in-links, mailto, javascript, and keeps external links only', () => {
+test('extractOutboundLinksFromHtml filters in-links, mailto, javascript, and captures <a> tags and plain text URLs', () => {
   const html = `
     <div>
       <a href="/about-us">About internal</a>
@@ -93,11 +98,11 @@ test('extractOutboundLinksFromHtml filters in-links, mailto, javascript, and kee
       <a href="mailto:info@mysite.com">Mailto link</a>
       <a href="https://external-partner.com/research">Partner Research</a>
       <a href="https://twitter.com/mysite">Twitter Profile</a>
+      <p>Also check out https://unlinked-reference.org/data for studies.</p>
     </div>
   `;
 
   const links = extractOutboundLinksFromHtml(html, 'https://mysite.com/blog', ['twitter.com']);
-  assert.equal(links.length, 2);
   const partner = links.find(l => l.domain === 'external-partner.com');
   assert.ok(partner);
   assert.equal(partner.anchorText, 'Partner Research');
@@ -106,6 +111,10 @@ test('extractOutboundLinksFromHtml filters in-links, mailto, javascript, and kee
   const twitter = links.find(l => l.domain === 'twitter.com');
   assert.ok(twitter);
   assert.equal(twitter.isExcluded, true);
+
+  const plainLink = links.find(l => l.domain === 'unlinked-reference.org');
+  assert.ok(plainLink);
+  assert.equal(plainLink.isExcluded, false);
 });
 
 test('formatJerryCollaborationEmail personalizes Jerry’s guest article template', () => {

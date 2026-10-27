@@ -75,6 +75,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [showPreview, setShowPreview] = useState(true);
   const [isSavedFeedback, setIsSavedFeedback] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  const handleManualSyncSheets = async () => {
+    if (!onTriggerGoogleSheetSync) return;
+    try {
+      setIsSyncing(true);
+      setSyncFeedback(null);
+      await onTriggerGoogleSheetSync();
+      setSyncFeedback('Leads successfully synced with Google Sheets!');
+      setTimeout(() => setSyncFeedback(null), 4000);
+    } catch (err: any) {
+      setSyncFeedback(err?.message || 'Failed to sync with Google Sheet');
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Sample lead data for realistic live preview
   const sampleLead = {
