@@ -1,0 +1,6 @@
+{
+  "name": "LeadScrape Pro - Email Hunter & Prospect CRM",
+  "description": "Automated Chrome extension & dashboard to discover, highlight, and manage verified public emails, track outreach status, color-code project tags, set follow-up reminders, and securely sync leads with local encryption.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
